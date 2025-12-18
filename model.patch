@@ -1,241 +1,281 @@
-diff --git a/backend/server.py b/backend/server.py
-index d1dc1f0..65f74fe 100644
---- a/backend/server.py
-+++ b/backend/server.py
-@@ -182,6 +182,7 @@ def _detect_glucose_spikes(
- ) -> List[Dict[str, Any]]:
-     """Detect spikes: rise by >= delta within timeframe.
+diff --git a/model.patch b/model.patch
+index 4f7d2f3..e69de29 100644
+--- a/model.patch
++++ b/model.patch
+@@ -1,241 +0,0 @@
+-diff --git a/backend/server.py b/backend/server.py
+-index d1dc1f0..65f74fe 100644
+---- a/backend/server.py
+-+++ b/backend/server.py
+-@@ -182,6 +182,7 @@ def _detect_glucose_spikes(
+- ) -> List[Dict[str, Any]]:
+-     """Detect spikes: rise by >= delta within timeframe.
+- 
+-+    Industry default: +30 mg/dL within 60 minutes.
+-     Returns spike windows with baseline/start, peak and delta.
+-     """
+- 
+-@@ -202,7 +203,7 @@ def _detect_glucose_spikes(
+- 
+-     tf = timedelta(minutes=timeframe_minutes)
+- 
+--    # Simple O(n^2) for 24h small N; can optimize later.
+-+    # Simple O(n^2) for 24h small N; optimize later if needed.
+-     for i in range(len(points) - 1):
+-         base = points[i]
+-         peak = base
+-@@ -213,6 +214,76 @@ def _detect_glucose_spikes(
+-             if cur["mg_dl"] > peak["mg_dl"]:
+-                 peak = cur
+- 
+-+        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
+-+            spikes.append(
+-+                {
+-+                    "start": base["t"],
+-+                    "end": peak["t"],
+-+                    "baseline_mg_dl": base["mg_dl"],
+-+                    "peak_mg_dl": peak["mg_dl"],
+-+                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
+-+                }
+-+            )
+-+
+-+    # Merge overlapping spikes
+-+    merged: List[Dict[str, Any]] = []
+-+    for s in spikes:
+-+        if not merged:
+-+            merged.append(s)
+-+            continue
+-+        last = merged[-1]
+-+        if s["start"] <= last["end"]:
+-+            last["end"] = max(last["end"], s["end"])
+-+            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
+-+            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
+-+        else:
+-+            merged.append(s)
+-+
+-+    return merged
+-+
+-+
+-+def _correlate_spike_with_dip(
+-+    spikes: List[Dict[str, Any]],
+-+    dips: List[Dict[str, Any]],
+-+) -> List[CorrelationEvent]:
+-+    """Correlate a glucose spike with an inactivity dip.
+-+
+-+    Dip is any 20-minute window with <100 total steps (default), overlapping the spike's 60-minute window.
+-+    """
+-+
+-+    events: List[CorrelationEvent] = []
+-+    for s in spikes:
+-+        s_start = _ensure_tz(s["start"])
+-+        s_end = _ensure_tz(s["end"])
+-+        s_window_end = s_start + timedelta(minutes=60)
+-+
+-+        for d in dips:
+-+            d_start = _ensure_tz(d["start"])
+-+            d_end = _ensure_tz(d["end"])
+-+
+-+            # overlap with spike window [s_start, s_start+60m]
+-+            if d_end >= s_start and d_start <= s_window_end:
+-+                events.append(
+-+                    CorrelationEvent(
+-+                        spike={
+-+                            "start": _dt_to_iso(s_start),
+-+                            "end": _dt_to_iso(s_end),
+-+                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
+-+                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
+-+                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
+-+                        },
+-+                        activity_dip={
+-+                            "start": _dt_to_iso(d_start),
+-+                            "end": _dt_to_iso(d_end),
+-+                            "reason": d.get("reason"),
+-+                            "steps": d.get("steps"),
+-+                        },
+-+                    )
+-+                )
+-+                break
+-+
+-+    return events
+-+
+- # =============================
+- # Phase 1: Vital Metrics APIs
+- # =============================
+-@@ -241,17 +312,19 @@ async def ingest_samples(payload: SamplesIngestRequest):
+-             "data": s.data,
+-         }
+- 
+--        # Convenience extracted fields for querying/plotting
+-         if s.type == "blood_glucose":
+-             doc["mg_dl"] = float(s.data.get("mg_dl")) if s.data.get("mg_dl") is not None else None
+-             doc["source"] = s.data.get("source")
+-         elif s.type == "heart_rate":
+-             doc["bpm"] = float(s.data.get("bpm")) if s.data.get("bpm") is not None else None
+-         elif s.type == "blood_pressure":
+--            doc["systolic_mmhg"] = float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
+--            doc["diastolic_mmhg"] = float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
+-+            doc["systolic_mmhg"] = (
+-+                float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
+-+            )
+-+            doc["diastolic_mmhg"] = (
+-+                float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
+-+            )
+-         elif s.type == "steps":
+--            # accept either spm or steps for an interval; normalize to spm if interval minutes given
+-             interval_minutes = float(s.data.get("interval_minutes") or 1)
+-             steps = float(s.data.get("steps") or 0)
+-             spm = float(s.data.get("spm")) if s.data.get("spm") is not None else (steps / interval_minutes)
+-@@ -259,7 +332,9 @@ async def ingest_samples(payload: SamplesIngestRequest):
+-         elif s.type == "exercise_minutes":
+-             doc["minutes"] = float(s.data.get("minutes")) if s.data.get("minutes") is not None else None
+-         elif s.type == "ecg":
+--            doc["average_bpm"] = float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
+-+            doc["average_bpm"] = (
+-+                float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
+-+            )
+-             doc["classification"] = s.data.get("classification")
+- 
+-         docs.append(doc)
+-@@ -269,7 +344,6 @@ async def ingest_samples(payload: SamplesIngestRequest):
+-             res = await db.health_samples_raw.insert_many(docs)
+-             inserted = len(res.inserted_ids)
+-         else:
+--            # aggregated: store as-is in a separate collection for now
+-             res = await db.health_samples_agg.insert_many(docs)
+-             inserted = len(res.inserted_ids)
+- 
+-@@ -285,21 +359,23 @@ async def run_correlation(
+-     raw = await _fetch_samples_raw(user_id, start, end)
+- 
+-     glucose_points: List[Dict[str, Any]] = []
+--    steps_points: List[Dict[str, Any]] = []
+-+    activity_points: List[Dict[str, Any]] = []
+- 
+-     for d in raw:
+--        if d.get("type") == "blood_glucose" and d.get("mg_dl") is not None:
+-+        typ = d.get("type")
+-+        if typ == "blood_glucose" and d.get("mg_dl") is not None:
+-             glucose_points.append({"timestamp": d["timestamp"], "mg_dl": d.get("mg_dl"), "source": d.get("source")})
+-+
+-         if activity_metric == "steps_per_min":
+--            if d.get("type") == "steps":
+--                steps_points.append({"timestamp": d["timestamp"], "spm": d.get("spm") or 0})
+-+            if typ == "steps":
+-+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("spm") or 0)})
+-         else:
+--            # exercise minutes: treat any minute without exercise as 0; store minutes in bucket timestamp
+--            if d.get("type") == "exercise_minutes":
+--                steps_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
+-+            if typ == "exercise_minutes":
+-+                # map minutes to a pseudo count to re-use dip logic
+-+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
+- 
+-     spikes = _detect_glucose_spikes(glucose_points)
+--    dips = _rolling_steps_dip_windows(steps_points, start=start, end=end)
+-+    dips = _rolling_steps_dip_windows(activity_points, start=start, end=end)
+-     events = _correlate_spike_with_dip(spikes, dips)
+- 
+-     if events:
+-@@ -388,67 +464,6 @@ async def dashboard_24h(
+-         correlations=correlations,
+-     )
+- 
+--        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
+--            spikes.append(
+--                {
+--                    "start": base["t"],
+--                    "end": peak["t"],
+--                    "baseline_mg_dl": base["mg_dl"],
+--                    "peak_mg_dl": peak["mg_dl"],
+--                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
+--                }
+--            )
+--
+--    # Merge spikes that start within the previous spike window
+--    merged: List[Dict[str, Any]] = []
+--    for s in spikes:
+--        if not merged:
+--            merged.append(s)
+--            continue
+--        last = merged[-1]
+--        if s["start"] <= last["end"]:
+--            last["end"] = max(last["end"], s["end"])
+--            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
+--            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
+--        else:
+--            merged.append(s)
+--
+--    return merged
+--
+--
+--def _correlate_spike_with_dip(
+--    spikes: List[Dict[str, Any]],
+--    dips: List[Dict[str, Any]],
+--) -> List[CorrelationEvent]:
+--    events: List[CorrelationEvent] = []
+--    for s in spikes:
+--        s_start = _ensure_tz(s["start"])
+--        s_window_end = s_start + timedelta(minutes=60)
+--        for d in dips:
+--            d_start = _ensure_tz(d["start"])
+--            d_end = _ensure_tz(d["end"])
+--            # overlap: dip overlaps spike window [s_start, s_start+60m]
+--            if d_end >= s_start and d_start <= s_window_end:
+--                events.append(
+--                    CorrelationEvent(
+--                        spike={
+--                            "start": _dt_to_iso(s_start),
+--                            "end": _dt_to_iso(_ensure_tz(s["end"])),
+--                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
+--                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
+--                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
+--                        },
+--                        activity_dip={
+--                            "start": _dt_to_iso(d_start),
+--                            "end": _dt_to_iso(d_end),
+--                            "reason": d.get("reason"),
+--                            "steps": d.get("steps"),
+--                        },
+--                    )
+--                )
+--                break
+--    return events
+--
+- # Add your routes to the router instead of directly to app
+- @api_router.get("/")
+- async def root():
+diff --git a/test_result.md b/test_result.md
+index eb310fe..b9e53b5 100644
+--- a/test_result.md
++++ b/test_result.md
+@@ -106,15 +106,18 @@ user_problem_statement: "Build cross-platform mobile app integrating Apple Healt
+ backend:
+   - task: "Phase 1: ingest samples + 24h dashboard + correlation endpoints"
+     implemented: true
+-    working: "NA"
++    working: true
+     file: "/app/backend/server.py"
+     stuck_count: 0
+     priority: "high"
+-    needs_retesting: true
++    needs_retesting: false
+     status_history:
+       - working: "NA"
+         agent: "main"
+         comment: "Implemented /api/samples (raw/aggregated/local_only), /api/dashboard/24h, /api/correlation/run with spike(+30 mg/dL/60m) + dip(<100 steps/20m) logic. Needs curl verification via backend testing agent."
++      - working: true
++        agent: "testing"
++        comment: "✅ ALL TESTS PASSED: POST /api/samples (30/30 samples ingested), GET /api/dashboard/24h (series data + 1 correlation found), POST /api/correlation/run (1 event created), future timestamp rejection (400 error). Correlation engine correctly detected glucose spike (110→150 mg/dL, +40 delta) with activity dip (0 steps/min for 26 minutes). Backend Phase 1 fully functional."
  
-+    Industry default: +30 mg/dL within 60 minutes.
-     Returns spike windows with baseline/start, peak and delta.
-     """
+ frontend:
+   - task: "Phase 1: dashboard + add sample + settings UI (Expo Router tabs)"
+@@ -144,4 +147,6 @@ test_plan:
  
-@@ -202,7 +203,7 @@ def _detect_glucose_spikes(
- 
-     tf = timedelta(minutes=timeframe_minutes)
- 
--    # Simple O(n^2) for 24h small N; can optimize later.
-+    # Simple O(n^2) for 24h small N; optimize later if needed.
-     for i in range(len(points) - 1):
-         base = points[i]
-         peak = base
-@@ -213,6 +214,76 @@ def _detect_glucose_spikes(
-             if cur["mg_dl"] > peak["mg_dl"]:
-                 peak = cur
- 
-+        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
-+            spikes.append(
-+                {
-+                    "start": base["t"],
-+                    "end": peak["t"],
-+                    "baseline_mg_dl": base["mg_dl"],
-+                    "peak_mg_dl": peak["mg_dl"],
-+                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
-+                }
-+            )
-+
-+    # Merge overlapping spikes
-+    merged: List[Dict[str, Any]] = []
-+    for s in spikes:
-+        if not merged:
-+            merged.append(s)
-+            continue
-+        last = merged[-1]
-+        if s["start"] <= last["end"]:
-+            last["end"] = max(last["end"], s["end"])
-+            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
-+            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
-+        else:
-+            merged.append(s)
-+
-+    return merged
-+
-+
-+def _correlate_spike_with_dip(
-+    spikes: List[Dict[str, Any]],
-+    dips: List[Dict[str, Any]],
-+) -> List[CorrelationEvent]:
-+    """Correlate a glucose spike with an inactivity dip.
-+
-+    Dip is any 20-minute window with <100 total steps (default), overlapping the spike's 60-minute window.
-+    """
-+
-+    events: List[CorrelationEvent] = []
-+    for s in spikes:
-+        s_start = _ensure_tz(s["start"])
-+        s_end = _ensure_tz(s["end"])
-+        s_window_end = s_start + timedelta(minutes=60)
-+
-+        for d in dips:
-+            d_start = _ensure_tz(d["start"])
-+            d_end = _ensure_tz(d["end"])
-+
-+            # overlap with spike window [s_start, s_start+60m]
-+            if d_end >= s_start and d_start <= s_window_end:
-+                events.append(
-+                    CorrelationEvent(
-+                        spike={
-+                            "start": _dt_to_iso(s_start),
-+                            "end": _dt_to_iso(s_end),
-+                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
-+                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
-+                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
-+                        },
-+                        activity_dip={
-+                            "start": _dt_to_iso(d_start),
-+                            "end": _dt_to_iso(d_end),
-+                            "reason": d.get("reason"),
-+                            "steps": d.get("steps"),
-+                        },
-+                    )
-+                )
-+                break
-+
-+    return events
-+
- # =============================
- # Phase 1: Vital Metrics APIs
- # =============================
-@@ -241,17 +312,19 @@ async def ingest_samples(payload: SamplesIngestRequest):
-             "data": s.data,
-         }
- 
--        # Convenience extracted fields for querying/plotting
-         if s.type == "blood_glucose":
-             doc["mg_dl"] = float(s.data.get("mg_dl")) if s.data.get("mg_dl") is not None else None
-             doc["source"] = s.data.get("source")
-         elif s.type == "heart_rate":
-             doc["bpm"] = float(s.data.get("bpm")) if s.data.get("bpm") is not None else None
-         elif s.type == "blood_pressure":
--            doc["systolic_mmhg"] = float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
--            doc["diastolic_mmhg"] = float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
-+            doc["systolic_mmhg"] = (
-+                float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
-+            )
-+            doc["diastolic_mmhg"] = (
-+                float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
-+            )
-         elif s.type == "steps":
--            # accept either spm or steps for an interval; normalize to spm if interval minutes given
-             interval_minutes = float(s.data.get("interval_minutes") or 1)
-             steps = float(s.data.get("steps") or 0)
-             spm = float(s.data.get("spm")) if s.data.get("spm") is not None else (steps / interval_minutes)
-@@ -259,7 +332,9 @@ async def ingest_samples(payload: SamplesIngestRequest):
-         elif s.type == "exercise_minutes":
-             doc["minutes"] = float(s.data.get("minutes")) if s.data.get("minutes") is not None else None
-         elif s.type == "ecg":
--            doc["average_bpm"] = float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
-+            doc["average_bpm"] = (
-+                float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
-+            )
-             doc["classification"] = s.data.get("classification")
- 
-         docs.append(doc)
-@@ -269,7 +344,6 @@ async def ingest_samples(payload: SamplesIngestRequest):
-             res = await db.health_samples_raw.insert_many(docs)
-             inserted = len(res.inserted_ids)
-         else:
--            # aggregated: store as-is in a separate collection for now
-             res = await db.health_samples_agg.insert_many(docs)
-             inserted = len(res.inserted_ids)
- 
-@@ -285,21 +359,23 @@ async def run_correlation(
-     raw = await _fetch_samples_raw(user_id, start, end)
- 
-     glucose_points: List[Dict[str, Any]] = []
--    steps_points: List[Dict[str, Any]] = []
-+    activity_points: List[Dict[str, Any]] = []
- 
-     for d in raw:
--        if d.get("type") == "blood_glucose" and d.get("mg_dl") is not None:
-+        typ = d.get("type")
-+        if typ == "blood_glucose" and d.get("mg_dl") is not None:
-             glucose_points.append({"timestamp": d["timestamp"], "mg_dl": d.get("mg_dl"), "source": d.get("source")})
-+
-         if activity_metric == "steps_per_min":
--            if d.get("type") == "steps":
--                steps_points.append({"timestamp": d["timestamp"], "spm": d.get("spm") or 0})
-+            if typ == "steps":
-+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("spm") or 0)})
-         else:
--            # exercise minutes: treat any minute without exercise as 0; store minutes in bucket timestamp
--            if d.get("type") == "exercise_minutes":
--                steps_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
-+            if typ == "exercise_minutes":
-+                # map minutes to a pseudo count to re-use dip logic
-+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
- 
-     spikes = _detect_glucose_spikes(glucose_points)
--    dips = _rolling_steps_dip_windows(steps_points, start=start, end=end)
-+    dips = _rolling_steps_dip_windows(activity_points, start=start, end=end)
-     events = _correlate_spike_with_dip(spikes, dips)
- 
-     if events:
-@@ -388,67 +464,6 @@ async def dashboard_24h(
-         correlations=correlations,
-     )
- 
--        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
--            spikes.append(
--                {
--                    "start": base["t"],
--                    "end": peak["t"],
--                    "baseline_mg_dl": base["mg_dl"],
--                    "peak_mg_dl": peak["mg_dl"],
--                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
--                }
--            )
--
--    # Merge spikes that start within the previous spike window
--    merged: List[Dict[str, Any]] = []
--    for s in spikes:
--        if not merged:
--            merged.append(s)
--            continue
--        last = merged[-1]
--        if s["start"] <= last["end"]:
--            last["end"] = max(last["end"], s["end"])
--            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
--            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
--        else:
--            merged.append(s)
--
--    return merged
--
--
--def _correlate_spike_with_dip(
--    spikes: List[Dict[str, Any]],
--    dips: List[Dict[str, Any]],
--) -> List[CorrelationEvent]:
--    events: List[CorrelationEvent] = []
--    for s in spikes:
--        s_start = _ensure_tz(s["start"])
--        s_window_end = s_start + timedelta(minutes=60)
--        for d in dips:
--            d_start = _ensure_tz(d["start"])
--            d_end = _ensure_tz(d["end"])
--            # overlap: dip overlaps spike window [s_start, s_start+60m]
--            if d_end >= s_start and d_start <= s_window_end:
--                events.append(
--                    CorrelationEvent(
--                        spike={
--                            "start": _dt_to_iso(s_start),
--                            "end": _dt_to_iso(_ensure_tz(s["end"])),
--                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
--                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
--                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
--                        },
--                        activity_dip={
--                            "start": _dt_to_iso(d_start),
--                            "end": _dt_to_iso(d_end),
--                            "reason": d.get("reason"),
--                            "steps": d.get("steps"),
--                        },
--                    )
--                )
--                break
--    return events
--
- # Add your routes to the router instead of directly to app
- @api_router.get("/")
- async def root():
+ agent_communication:
+   - agent: "main"
+-    message: "Please test backend Phase 1 endpoints with curl: POST /api/samples with multiple metrics and ensure GET /api/dashboard/24h returns series + correlations. Also test /api/correlation/run returns events_created."
+\ No newline at end of file
++    message: "Please test backend Phase 1 endpoints with curl: POST /api/samples with multiple metrics and ensure GET /api/dashboard/24h returns series + correlations. Also test /api/correlation/run returns events_created."
++  - agent: "testing"
++    message: "✅ Phase 1 backend testing COMPLETE - All 4 tests passed! Created comprehensive test suite (/app/backend_test.py) and verified: (1) Sample ingestion with glucose spike + activity dip scenario (30 samples), (2) Dashboard 24h data retrieval with correlations, (3) Correlation engine creating events, (4) Future timestamp validation. The correlation engine correctly detected the glucose spike (110→150 mg/dL, +40 delta) coinciding with activity dip (0 steps for 26 minutes). Backend is fully functional and ready for production use."
+\ No newline at end of file
