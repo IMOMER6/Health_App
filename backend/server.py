@@ -212,6 +212,182 @@ def _detect_glucose_spikes(
                 break
             if cur["mg_dl"] > peak["mg_dl"]:
                 peak = cur
+
+# =============================
+# Phase 1: Vital Metrics APIs
+# =============================
+
+
+@api_router.post("/samples", response_model=SamplesIngestResponse)
+async def ingest_samples(payload: SamplesIngestRequest):
+    if payload.storage_mode == "local_only":
+        return SamplesIngestResponse(inserted=0)
+
+    inserted = 0
+    now = datetime.now(timezone.utc)
+
+    docs: List[Dict[str, Any]] = []
+    for s in payload.samples:
+        t = _ensure_tz(s.timestamp)
+        if t > now + timedelta(minutes=5):
+            raise HTTPException(status_code=400, detail="Sample timestamp is in the future")
+
+        doc: Dict[str, Any] = {
+            "user_id": payload.user_id,
+            "type": s.type,
+            "timestamp": t,
+            "end_time": _ensure_tz(s.end_time) if s.end_time else None,
+            "created_at": now,
+            "data": s.data,
+        }
+
+        # Convenience extracted fields for querying/plotting
+        if s.type == "blood_glucose":
+            doc["mg_dl"] = float(s.data.get("mg_dl")) if s.data.get("mg_dl") is not None else None
+            doc["source"] = s.data.get("source")
+        elif s.type == "heart_rate":
+            doc["bpm"] = float(s.data.get("bpm")) if s.data.get("bpm") is not None else None
+        elif s.type == "blood_pressure":
+            doc["systolic_mmhg"] = float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
+            doc["diastolic_mmhg"] = float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
+        elif s.type == "steps":
+            # accept either spm or steps for an interval; normalize to spm if interval minutes given
+            interval_minutes = float(s.data.get("interval_minutes") or 1)
+            steps = float(s.data.get("steps") or 0)
+            spm = float(s.data.get("spm")) if s.data.get("spm") is not None else (steps / interval_minutes)
+            doc["spm"] = spm
+        elif s.type == "exercise_minutes":
+            doc["minutes"] = float(s.data.get("minutes")) if s.data.get("minutes") is not None else None
+        elif s.type == "ecg":
+            doc["average_bpm"] = float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
+            doc["classification"] = s.data.get("classification")
+
+        docs.append(doc)
+
+    if docs:
+        if payload.storage_mode == "raw":
+            res = await db.health_samples_raw.insert_many(docs)
+            inserted = len(res.inserted_ids)
+        else:
+            # aggregated: store as-is in a separate collection for now
+            res = await db.health_samples_agg.insert_many(docs)
+            inserted = len(res.inserted_ids)
+
+    return SamplesIngestResponse(inserted=inserted)
+
+
+@api_router.post("/correlation/run")
+async def run_correlation(
+    user_id: str = Query(...),
+    activity_metric: Literal["steps_per_min", "exercise_minutes"] = Query("steps_per_min"),
+):
+    start, end = await _get_user_window_24h(user_id)
+    raw = await _fetch_samples_raw(user_id, start, end)
+
+    glucose_points: List[Dict[str, Any]] = []
+    steps_points: List[Dict[str, Any]] = []
+
+    for d in raw:
+        if d.get("type") == "blood_glucose" and d.get("mg_dl") is not None:
+            glucose_points.append({"timestamp": d["timestamp"], "mg_dl": d.get("mg_dl"), "source": d.get("source")})
+        if activity_metric == "steps_per_min":
+            if d.get("type") == "steps":
+                steps_points.append({"timestamp": d["timestamp"], "spm": d.get("spm") or 0})
+        else:
+            # exercise minutes: treat any minute without exercise as 0; store minutes in bucket timestamp
+            if d.get("type") == "exercise_minutes":
+                steps_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
+
+    spikes = _detect_glucose_spikes(glucose_points)
+    dips = _rolling_steps_dip_windows(steps_points, start=start, end=end)
+    events = _correlate_spike_with_dip(spikes, dips)
+
+    if events:
+        await db.correlation_events.insert_one(
+            {
+                "user_id": user_id,
+                "created_at": datetime.now(timezone.utc),
+                "window": {"start": start, "end": end},
+                "events": [e.model_dump() for e in events],
+                "activity_metric": activity_metric,
+            }
+        )
+
+    return {"events_created": len(events)}
+
+
+@api_router.get("/dashboard/24h", response_model=Dashboard24hResponse)
+async def dashboard_24h(
+    user_id: str = Query(...),
+    activity_metric: Literal["steps_per_min", "exercise_minutes"] = Query("steps_per_min"),
+):
+    start, end = await _get_user_window_24h(user_id)
+    raw = await _fetch_samples_raw(user_id, start, end)
+
+    series: Dict[str, Any] = {
+        "blood_glucose": [],
+        "heart_rate": [],
+        "blood_pressure": [],
+        "steps_per_min": [],
+        "exercise_minutes": [],
+        "ecg": [],
+    }
+
+    glucose_points: List[Dict[str, Any]] = []
+    activity_points: List[Dict[str, Any]] = []
+
+    for d in raw:
+        t = _ensure_tz(d["timestamp"])
+        typ = d.get("type")
+        if typ == "blood_glucose" and d.get("mg_dl") is not None:
+            p = {"t": _dt_to_iso(t), "mg_dl": float(d["mg_dl"]), "source": d.get("source")}
+            series["blood_glucose"].append(p)
+            glucose_points.append({"timestamp": t, "mg_dl": float(d["mg_dl"]), "source": d.get("source")})
+
+        elif typ == "heart_rate" and d.get("bpm") is not None:
+            series["heart_rate"].append({"t": _dt_to_iso(t), "bpm": float(d["bpm"])})
+
+        elif typ == "blood_pressure" and d.get("systolic_mmhg") is not None and d.get("diastolic_mmhg") is not None:
+            series["blood_pressure"].append(
+                {
+                    "t": _dt_to_iso(t),
+                    "systolic_mmhg": float(d["systolic_mmhg"]),
+                    "diastolic_mmhg": float(d["diastolic_mmhg"]),
+                }
+            )
+
+        elif typ == "steps":
+            spm = float(d.get("spm") or 0)
+            series["steps_per_min"].append({"t": _dt_to_iso(t), "spm": spm})
+            if activity_metric == "steps_per_min":
+                activity_points.append({"timestamp": t, "spm": spm})
+
+        elif typ == "exercise_minutes":
+            mins = float(d.get("minutes") or 0)
+            series["exercise_minutes"].append({"t": _dt_to_iso(t), "minutes": mins})
+            if activity_metric == "exercise_minutes":
+                # convert minutes datapoint into a pseudo activity scalar for dip detection
+                activity_points.append({"timestamp": t, "spm": mins * 5})
+
+        elif typ == "ecg":
+            series["ecg"].append(
+                {
+                    "t": _dt_to_iso(t),
+                    "average_bpm": d.get("average_bpm"),
+                    "classification": d.get("classification"),
+                }
+            )
+
+    spikes = _detect_glucose_spikes(glucose_points)
+    dips = _rolling_steps_dip_windows(activity_points, start=start, end=end)
+    correlations = _correlate_spike_with_dip(spikes, dips)
+
+    return Dashboard24hResponse(
+        window={"start": _dt_to_iso(start), "end": _dt_to_iso(end)},
+        series=series,
+        correlations=correlations,
+    )
+
         if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
             spikes.append(
                 {
