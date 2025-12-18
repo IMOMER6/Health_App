@@ -97,7 +97,51 @@
 #====================================================================================================
 
 
-
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: "Build cross-platform mobile app integrating Apple HealthKit and Google Health Connect. Request permissions for Blood Glucose, Heart Rate (ECG), and Blood Pressure. Create centralized dashboard for 24-hour metrics and a correlation engine to detect glucose spike coinciding with activity dip."
+
+backend:
+  - task: "Phase 1: ingest samples + 24h dashboard + correlation endpoints"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented /api/samples (raw/aggregated/local_only), /api/dashboard/24h, /api/correlation/run with spike(+30 mg/dL/60m) + dip(<100 steps/20m) logic. Needs curl verification via backend testing agent."
+
+frontend:
+  - task: "Phase 1: dashboard + add sample + settings UI (Expo Router tabs)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/*"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Implemented Tabs layout, Dashboard charts using react-native-gifted-charts, Add Sample form posting /api/samples, Settings for storage mode and activity metric. Frontend not tested by test agent (await user permission)."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Phase 1: ingest samples + 24h dashboard + correlation endpoints"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: "Please test backend Phase 1 endpoints with curl: POST /api/samples with multiple metrics and ensure GET /api/dashboard/24h returns series + correlations. Also test /api/correlation/run returns events_created."
