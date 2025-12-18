@@ -77,7 +77,7 @@ export default function SettingsScreen() {
       const up = await uploadToBackend({ userId, storageMode, samples: read.samples });
       Alert.alert("Sync complete", `Uploaded: ${up.uploaded}. Skipped: ${up.skipped}.`);
     } catch (e) {
-      const msg = (e as any)?.message ?? "Please try again.";
+      const msg = (e as unknown as { message?: string })?.message ?? "Please try again.";
       Alert.alert("Sync failed", msg);
     } finally {
       setBusy(false);
