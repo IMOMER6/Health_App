@@ -1,5 +1,13 @@
-import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
 import { useSettingsStore } from "../src/state/settingsStore";
 import { useUserStore } from "../src/state/userStore";
@@ -7,6 +15,8 @@ import { Card } from "../src/ui/components/Card";
 import { Chip } from "../src/ui/components/Chip";
 import { Screen } from "../src/ui/components/Screen";
 import { colors } from "../src/ui/theme";
+import { getConnectorStatus, readLast24h, requestPermissions } from "../src/health/healthProvider";
+import { uploadToBackend } from "../src/health/sync";
 
 export default function SettingsScreen() {
   const storageMode = useSettingsStore((s) => s.storageMode);
