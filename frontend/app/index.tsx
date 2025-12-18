@@ -161,7 +161,9 @@ export default function DashboardScreen() {
               noOfSections={4}
             />
           )}
-          <Text style={styles.hint}>Correlation uses: +30 mg/dL within 60m & <100 steps over 20m.</Text>
+          <Text style={styles.hint}>
+            Correlation uses: +30 mg/dL within 60m & <100 steps over 20m.
+          </Text>
         </Card>
 
         <Card>
