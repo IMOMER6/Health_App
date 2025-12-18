@@ -26,7 +26,7 @@ export default function SettingsScreen() {
 
   const userId = useUserStore((s) => s.userId);
 
-  const [connectorStatus, setConnectorStatus] = useState<string>("Checking availability...");
+  const [connectorStatus, setConnectorStatus] = useState("Checking availability...");
   const [busy, setBusy] = useState(false);
 
   const isNative = useMemo(() => connectorStatus.startsWith("Available"), [connectorStatus]);
