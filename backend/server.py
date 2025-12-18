@@ -344,7 +344,6 @@ async def ingest_samples(payload: SamplesIngestRequest):
             res = await db.health_samples_raw.insert_many(docs)
             inserted = len(res.inserted_ids)
         else:
-            # aggregated: store as-is in a separate collection for now
             res = await db.health_samples_agg.insert_many(docs)
             inserted = len(res.inserted_ids)
 
