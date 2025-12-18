@@ -26,6 +26,63 @@ export default function SettingsScreen() {
 
   const userId = useUserStore((s) => s.userId);
 
+  const [connectorStatus, setConnectorStatus] = useState<string>("Checking availability...");
+  const [busy, setBusy] = useState(false);
+
+  const isNative = useMemo(() => connectorStatus.startsWith("Available"), [connectorStatus]);
+
+  const refreshStatus = async () => {
+    const s = await getConnectorStatus();
+    if (s.available) setConnectorStatus("Available");
+    else setConnectorStatus(`Unavailable: ${s.reason}`);
+  };
+
+  React.useEffect(() => {
+    refreshStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const onConnect = async () => {
+    setBusy(true);
+    try {
+      const res = await requestPermissions();
+      if (!res.granted) {
+        Alert.alert("Permissions not granted", res.reason ?? "");
+        return;
+      }
+      Alert.alert("Connected", "Permissions granted.");
+      await refreshStatus();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSyncLast24h = async () => {
+    setBusy(true);
+    try {
+      const end = new Date();
+      const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+      const read = await readLast24h({ start, end });
+
+      if (read.unavailable) {
+        Alert.alert("Unavailable", read.unavailable);
+        return;
+      }
+
+      if (!read.samples.length) {
+        Alert.alert("No data", "No samples found in the last 24h.");
+        return;
+      }
+
+      const up = await uploadToBackend({ userId, storageMode, samples: read.samples });
+      Alert.alert("Sync complete", `Uploaded: ${up.uploaded}. Skipped: ${up.skipped}.`);
+    } catch (e: any) {
+      Alert.alert("Sync failed", e?.message ?? "Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={styles.content}>
