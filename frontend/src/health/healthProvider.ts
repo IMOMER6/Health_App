@@ -191,7 +191,7 @@ export async function readLast24h(window: HealthReadWindow): Promise<HealthReadR
 
     const timeRangeFilter = { operator: "between", startTime, endTime } as const;
 
-    const [glucose, hr, bp, steps, exercise] = await Promise.all([
+    const [glucoseRes, hrRes, bpRes, stepsRes, exerciseRes] = await Promise.all([
       readRecords("BloodGlucose", { timeRangeFilter }),
       readRecords("HeartRate", { timeRangeFilter }),
       readRecords("BloodPressure", { timeRangeFilter }),
@@ -199,9 +199,15 @@ export async function readLast24h(window: HealthReadWindow): Promise<HealthReadR
       readRecords("ExerciseSession", { timeRangeFilter }),
     ]);
 
+    const glucose = ((glucoseRes as unknown as any)?.records ?? []) as any[];
+    const hr = ((hrRes as unknown as any)?.records ?? []) as any[];
+    const bp = ((bpRes as unknown as any)?.records ?? []) as any[];
+    const steps = ((stepsRes as unknown as any)?.records ?? []) as any[];
+    const exercise = ((exerciseRes as unknown as any)?.records ?? []) as any[];
+
     const samples: any[] = [];
 
-    for (const g of (glucose as any[] | undefined) ?? []) {
+    for (const g of glucose) {
       const mgDl = g.level?.inMgPerDl ?? (g.level?.inMmolPerL ? g.level.inMmolPerL * 18.018 : undefined);
       if (mgDl != null) {
         samples.push({
