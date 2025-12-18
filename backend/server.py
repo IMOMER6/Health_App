@@ -312,17 +312,19 @@ async def ingest_samples(payload: SamplesIngestRequest):
             "data": s.data,
         }
 
-        # Convenience extracted fields for querying/plotting
         if s.type == "blood_glucose":
             doc["mg_dl"] = float(s.data.get("mg_dl")) if s.data.get("mg_dl") is not None else None
             doc["source"] = s.data.get("source")
         elif s.type == "heart_rate":
             doc["bpm"] = float(s.data.get("bpm")) if s.data.get("bpm") is not None else None
         elif s.type == "blood_pressure":
-            doc["systolic_mmhg"] = float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
-            doc["diastolic_mmhg"] = float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
+            doc["systolic_mmhg"] = (
+                float(s.data.get("systolic_mmhg")) if s.data.get("systolic_mmhg") is not None else None
+            )
+            doc["diastolic_mmhg"] = (
+                float(s.data.get("diastolic_mmhg")) if s.data.get("diastolic_mmhg") is not None else None
+            )
         elif s.type == "steps":
-            # accept either spm or steps for an interval; normalize to spm if interval minutes given
             interval_minutes = float(s.data.get("interval_minutes") or 1)
             steps = float(s.data.get("steps") or 0)
             spm = float(s.data.get("spm")) if s.data.get("spm") is not None else (steps / interval_minutes)
@@ -330,7 +332,9 @@ async def ingest_samples(payload: SamplesIngestRequest):
         elif s.type == "exercise_minutes":
             doc["minutes"] = float(s.data.get("minutes")) if s.data.get("minutes") is not None else None
         elif s.type == "ecg":
-            doc["average_bpm"] = float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
+            doc["average_bpm"] = (
+                float(s.data.get("average_bpm")) if s.data.get("average_bpm") is not None else None
+            )
             doc["classification"] = s.data.get("classification")
 
         docs.append(doc)
