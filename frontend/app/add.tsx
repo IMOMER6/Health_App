@@ -15,7 +15,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { api } from "../src/api/client";
-import type { IngestSample, SampleType } from "../src/api/types";
+import { IngestSample, SampleType } from "../src/api/types";
 import { useSettingsStore } from "../src/state/settingsStore";
 import { useUserStore } from "../src/state/userStore";
 import { Card } from "../src/ui/components/Card";
