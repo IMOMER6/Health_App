@@ -106,15 +106,18 @@ user_problem_statement: "Build cross-platform mobile app integrating Apple Healt
 backend:
   - task: "Phase 1: ingest samples + 24h dashboard + correlation endpoints"
     implemented: true
-    working: "NA"
+    working: true
     file: "/app/backend/server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: "NA"
         agent: "main"
         comment: "Implemented /api/samples (raw/aggregated/local_only), /api/dashboard/24h, /api/correlation/run with spike(+30 mg/dL/60m) + dip(<100 steps/20m) logic. Needs curl verification via backend testing agent."
+      - working: true
+        agent: "testing"
+        comment: "✅ ALL TESTS PASSED: POST /api/samples (30/30 samples ingested), GET /api/dashboard/24h (series data + 1 correlation found), POST /api/correlation/run (1 event created), future timestamp rejection (400 error). Correlation engine correctly detected glucose spike (110→150 mg/dL, +40 delta) with activity dip (0 steps/min for 26 minutes). Backend Phase 1 fully functional."
 
 frontend:
   - task: "Phase 1: dashboard + add sample + settings UI (Expo Router tabs)"
