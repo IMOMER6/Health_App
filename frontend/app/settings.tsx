@@ -39,7 +39,6 @@ export default function SettingsScreen() {
 
   React.useEffect(() => {
     refreshStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onConnect = async () => {
