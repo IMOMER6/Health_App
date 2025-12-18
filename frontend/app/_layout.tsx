@@ -13,6 +13,18 @@ const queryClient = new QueryClient({
   },
 });
 
+function TabIcon({
+  name,
+  color,
+  size,
+}: {
+  name: React.ComponentProps<typeof Ionicons>["name"];
+  color: string;
+  size: number;
+}) {
+  return <Ionicons name={name} color={color} size={size} />;
+}
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
@@ -36,7 +48,7 @@ export default function RootLayout() {
             options={{
               title: "Dashboard",
               tabBarIcon: ({ color, size }) => (
-                <Ionicons name="pulse" color={color} size={size} />
+                <TabIcon name="pulse" color={color} size={size} />
               ),
             }}
           />
@@ -45,7 +57,7 @@ export default function RootLayout() {
             options={{
               title: "Add",
               tabBarIcon: ({ color, size }) => (
-                <Ionicons name="add-circle" color={color} size={size} />
+                <TabIcon name="add-circle" color={color} size={size} />
               ),
             }}
           />
@@ -54,7 +66,7 @@ export default function RootLayout() {
             options={{
               title: "Settings",
               tabBarIcon: ({ color, size }) => (
-                <Ionicons name="settings" color={color} size={size} />
+                <TabIcon name="settings" color={color} size={size} />
               ),
             }}
           />
