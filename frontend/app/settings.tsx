@@ -140,14 +140,54 @@ export default function SettingsScreen() {
         </Card>
 
         <Card>
-          <Text style={styles.cardTitle}>Connectors (Phase 2)</Text>
+          <Text style={styles.cardTitle}>Health connectors</Text>
           <Text style={styles.body}>
-            HealthKit + Health Connect permissions and background sync will be added next.
+            iOS uses Apple HealthKit. Android uses Health Connect.
           </Text>
-          <View style={{ gap: 8, marginTop: 12 }}>
-            <Text style={styles.connectorRow}>• Apple HealthKit: pending</Text>
-            <Text style={styles.connectorRow}>• Google Health Connect: pending</Text>
+          <Text style={styles.connectorRow}>Status: {connectorStatus}</Text>
+
+          <View style={{ height: 12 }} />
+
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={refreshStatus}
+              disabled={busy}
+              style={[styles.secondaryBtn, busy ? styles.btnDisabled : undefined]}
+            >
+              <Text style={styles.secondaryBtnText}>Refresh</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              onPress={onConnect}
+              disabled={busy}
+              style={[styles.secondaryBtn, busy ? styles.btnDisabled : undefined]}
+            >
+              <Text style={styles.secondaryBtnText}>Request permissions</Text>
+            </TouchableOpacity>
           </View>
+
+          <View style={{ height: 12 }} />
+
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={onSyncLast24h}
+            disabled={busy || !isNative}
+            style={[styles.primaryBtn, (busy || !isNative) ? styles.btnDisabled : undefined]}
+          >
+            {busy ? (
+              <ActivityIndicator color={colors.text} />
+            ) : (
+              <Text style={styles.primaryBtnText}>Sync last 24h to dashboard</Text>
+            )}
+          </TouchableOpacity>
+
+          {!isNative ? (
+            <Text style={styles.note}>
+              Connectors aren’t available in the web preview. To use HealthKit/Health Connect you’ll need a dev build.
+            </Text>
+          ) : null}
         </Card>
       </ScrollView>
     </Screen>
