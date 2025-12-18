@@ -25,6 +25,27 @@
     },
     "plugins": [
       "expo-router",
+      "expo-dev-client",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 26
+          }
+        }
+      ],
+      "expo-health-connect",
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "Allow this app to read your health data to show your vital metrics dashboard.",
+          "healthUpdatePermission": "Allow this app to write health data when you choose to export.",
+          "isClinicalDataEnabled": false,
+          "healthClinicalDescription": "Allow this app to read clinical health records for better insights."
+        }
+      ],
       [
         "expo-splash-screen",
         {
