@@ -356,21 +356,23 @@ async def run_correlation(
     raw = await _fetch_samples_raw(user_id, start, end)
 
     glucose_points: List[Dict[str, Any]] = []
-    steps_points: List[Dict[str, Any]] = []
+    activity_points: List[Dict[str, Any]] = []
 
     for d in raw:
-        if d.get("type") == "blood_glucose" and d.get("mg_dl") is not None:
+        typ = d.get("type")
+        if typ == "blood_glucose" and d.get("mg_dl") is not None:
             glucose_points.append({"timestamp": d["timestamp"], "mg_dl": d.get("mg_dl"), "source": d.get("source")})
+
         if activity_metric == "steps_per_min":
-            if d.get("type") == "steps":
-                steps_points.append({"timestamp": d["timestamp"], "spm": d.get("spm") or 0})
+            if typ == "steps":
+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("spm") or 0)})
         else:
-            # exercise minutes: treat any minute without exercise as 0; store minutes in bucket timestamp
-            if d.get("type") == "exercise_minutes":
-                steps_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
+            if typ == "exercise_minutes":
+                # map minutes to a pseudo count to re-use dip logic
+                activity_points.append({"timestamp": d["timestamp"], "spm": float(d.get("minutes") or 0) * 5})
 
     spikes = _detect_glucose_spikes(glucose_points)
-    dips = _rolling_steps_dip_windows(steps_points, start=start, end=end)
+    dips = _rolling_steps_dip_windows(activity_points, start=start, end=end)
     events = _correlate_spike_with_dip(spikes, dips)
 
     if events:
