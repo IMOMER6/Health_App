@@ -459,67 +459,6 @@ async def dashboard_24h(
         correlations=correlations,
     )
 
-        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
-            spikes.append(
-                {
-                    "start": base["t"],
-                    "end": peak["t"],
-                    "baseline_mg_dl": base["mg_dl"],
-                    "peak_mg_dl": peak["mg_dl"],
-                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
-                }
-            )
-
-    # Merge spikes that start within the previous spike window
-    merged: List[Dict[str, Any]] = []
-    for s in spikes:
-        if not merged:
-            merged.append(s)
-            continue
-        last = merged[-1]
-        if s["start"] <= last["end"]:
-            last["end"] = max(last["end"], s["end"])
-            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
-            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
-        else:
-            merged.append(s)
-
-    return merged
-
-
-def _correlate_spike_with_dip(
-    spikes: List[Dict[str, Any]],
-    dips: List[Dict[str, Any]],
-) -> List[CorrelationEvent]:
-    events: List[CorrelationEvent] = []
-    for s in spikes:
-        s_start = _ensure_tz(s["start"])
-        s_window_end = s_start + timedelta(minutes=60)
-        for d in dips:
-            d_start = _ensure_tz(d["start"])
-            d_end = _ensure_tz(d["end"])
-            # overlap: dip overlaps spike window [s_start, s_start+60m]
-            if d_end >= s_start and d_start <= s_window_end:
-                events.append(
-                    CorrelationEvent(
-                        spike={
-                            "start": _dt_to_iso(s_start),
-                            "end": _dt_to_iso(_ensure_tz(s["end"])),
-                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
-                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
-                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
-                        },
-                        activity_dip={
-                            "start": _dt_to_iso(d_start),
-                            "end": _dt_to_iso(d_end),
-                            "reason": d.get("reason"),
-                            "steps": d.get("steps"),
-                        },
-                    )
-                )
-                break
-    return events
-
 # Add your routes to the router instead of directly to app
 @api_router.get("/")
 async def root():
