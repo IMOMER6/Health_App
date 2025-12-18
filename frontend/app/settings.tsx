@@ -236,4 +236,40 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 13,
   },
+  actionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  primaryBtn: {
+    minHeight: 48,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryBtnText: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  secondaryBtn: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    backgroundColor: colors.surface2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryBtnText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  btnDisabled: {
+    opacity: 0.6,
+  },
+
 });
