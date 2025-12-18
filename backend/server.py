@@ -182,6 +182,7 @@ def _detect_glucose_spikes(
 ) -> List[Dict[str, Any]]:
     """Detect spikes: rise by >= delta within timeframe.
 
+    Industry default: +30 mg/dL within 60 minutes.
     Returns spike windows with baseline/start, peak and delta.
     """
 
@@ -202,7 +203,7 @@ def _detect_glucose_spikes(
 
     tf = timedelta(minutes=timeframe_minutes)
 
-    # Simple O(n^2) for 24h small N; can optimize later.
+    # Simple O(n^2) for 24h small N; optimize later if needed.
     for i in range(len(points) - 1):
         base = points[i]
         peak = base
@@ -212,6 +213,76 @@ def _detect_glucose_spikes(
                 break
             if cur["mg_dl"] > peak["mg_dl"]:
                 peak = cur
+
+        if peak["mg_dl"] - base["mg_dl"] >= delta_mg_dl and peak != base:
+            spikes.append(
+                {
+                    "start": base["t"],
+                    "end": peak["t"],
+                    "baseline_mg_dl": base["mg_dl"],
+                    "peak_mg_dl": peak["mg_dl"],
+                    "delta_mg_dl": peak["mg_dl"] - base["mg_dl"],
+                }
+            )
+
+    # Merge overlapping spikes
+    merged: List[Dict[str, Any]] = []
+    for s in spikes:
+        if not merged:
+            merged.append(s)
+            continue
+        last = merged[-1]
+        if s["start"] <= last["end"]:
+            last["end"] = max(last["end"], s["end"])
+            last["peak_mg_dl"] = max(last["peak_mg_dl"], s["peak_mg_dl"])
+            last["delta_mg_dl"] = max(last["delta_mg_dl"], s["delta_mg_dl"])
+        else:
+            merged.append(s)
+
+    return merged
+
+
+def _correlate_spike_with_dip(
+    spikes: List[Dict[str, Any]],
+    dips: List[Dict[str, Any]],
+) -> List[CorrelationEvent]:
+    """Correlate a glucose spike with an inactivity dip.
+
+    Dip is any 20-minute window with <100 total steps (default), overlapping the spike's 60-minute window.
+    """
+
+    events: List[CorrelationEvent] = []
+    for s in spikes:
+        s_start = _ensure_tz(s["start"])
+        s_end = _ensure_tz(s["end"])
+        s_window_end = s_start + timedelta(minutes=60)
+
+        for d in dips:
+            d_start = _ensure_tz(d["start"])
+            d_end = _ensure_tz(d["end"])
+
+            # overlap with spike window [s_start, s_start+60m]
+            if d_end >= s_start and d_start <= s_window_end:
+                events.append(
+                    CorrelationEvent(
+                        spike={
+                            "start": _dt_to_iso(s_start),
+                            "end": _dt_to_iso(s_end),
+                            "delta_mg_dl": round(float(s["delta_mg_dl"]), 1),
+                            "baseline_mg_dl": round(float(s["baseline_mg_dl"]), 1),
+                            "peak_mg_dl": round(float(s["peak_mg_dl"]), 1),
+                        },
+                        activity_dip={
+                            "start": _dt_to_iso(d_start),
+                            "end": _dt_to_iso(d_end),
+                            "reason": d.get("reason"),
+                            "steps": d.get("steps"),
+                        },
+                    )
+                )
+                break
+
+    return events
 
 # =============================
 # Phase 1: Vital Metrics APIs
